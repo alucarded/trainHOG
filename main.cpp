@@ -198,6 +198,40 @@ static void getFilesInDirectory(const string& dirName, vector<string>& fileNames
     return;
 }
 
+static cv::Mat correctDimensions(const cv::Mat& img, const cv::Size& win_size) {
+    const int img_w = img.cols;
+    const int img_h = img.rows;
+    const int center_x = img_w/2;
+    const int center_y = img_h/2;
+    int min_x = std::max(0, center_x - win_size.width/2);
+    int max_x = std::min(img_w, center_x + win_size.width/2);
+    int min_y = std::max(0, center_y - win_size.height/2);
+    int max_y = std::min(img_h, center_y + win_size.height/2);
+    cv::Rect roi;
+    roi.x = min_x;
+    roi.y = min_y;
+    roi.width = max_x - min_x;
+    roi.height = max_y - min_y;
+    return img(roi);
+}
+
+static void createNegativeSamples(const cv::Mat& input,
+                                  const cv::Size& win_size,
+                                  const int stride_x,
+                                  const int stride_y,
+                                  std::vector<cv::Mat>& output) {
+    const int width = input.cols;
+    const int height = input.rows;
+    const int max_x = width - win_size.width;
+    const int max_y = height - win_size.height;
+    for ( int i = 0; i < max_y; i+=stride_y ) {
+        for (int j = 0; j < max_x; j+=stride_x ) {
+            cv::Rect rect(j, i, win_size.width, win_size.height);
+            output.push_back(input(rect).clone());
+        }
+    }
+}
+
 /**
  * This is the actual calculation from the (input) image data to the HOG descriptor/feature vector using the hog.compute() function
  * @param imageFilename file path of the image file to read and calculate feature vector from
@@ -205,28 +239,19 @@ static void getFilesInDirectory(const string& dirName, vector<string>& fileNames
  *      I can't comprehend why openCV implementation returns std::vector<float> instead of cv::MatExpr_<float> (e.g. Mat<float>)
  * @param hog HOGDescriptor containin HOG settings
  */
-static void calculateFeaturesFromInput(const string& imageFilename, vector<float>& featureVector, HOGDescriptor& hog) {
-    /** for imread flags from openCV documentation, 
-     * @see http://docs.opencv.org/modules/highgui/doc/reading_and_writing_images_and_video.html?highlight=imread#Mat imread(const string& filename, int flags)
-     * @note If you get a compile-time error complaining about following line (esp. imread),
-     * you either do not have a current openCV version (>2.0) 
-     * or the linking order is incorrect, try g++ -o openCVHogTrainer main.cpp `pkg-config --cflags --libs opencv`
-     */
-    Mat imageData = imread(imageFilename, IMREAD_GRAYSCALE);
-    if (imageData.empty()) {
-        featureVector.clear();
-        printf("Error: HOG image '%s' is empty, features calculation skipped!\n", imageFilename.c_str());
-        return;
-    }
+static void calculateFeaturesFromInput(const cv::Mat& imageData, vector<float>& featureVector, HOGDescriptor& hog) {
     // Check for mismatching dimensions
+    cv::Mat training_img(imageData);
     if (imageData.cols != hog.winSize.width || imageData.rows != hog.winSize.height) {
         featureVector.clear();
-        printf("Error: Image '%s' dimensions (%u x %u) do not match HOG window size (%u x %u)!\n", imageFilename.c_str(), imageData.cols, imageData.rows, hog.winSize.width, hog.winSize.height);
-        return;
+        printf("Warning: Image dimensions (%u x %u) do not match HOG window size (%u x %u)!\n", imageData.cols, imageData.rows, hog.winSize.width, hog.winSize.height);
+        printf("Correcting dimensions.\n");
+        training_img = correctDimensions(imageData, hog.winSize);
     }
+   // cv::imshow("Corrected", imageData);
+   // cv::waitKey();
     vector<Point> locations;
-    hog.compute(imageData, featureVector, winStride, trainingPadding, locations);
-    imageData.release(); // Release the image again after features are extracted
+    hog.compute(training_img, featureVector, winStride, trainingPadding, locations);
 }
 
 /**
@@ -367,6 +392,7 @@ int main(int argc, char** argv) {
      */ 
     fstream File;
     File.open(featuresFile.c_str(), ios::out);
+    int neg_samples_count = 0;
     if (File.good() && File.is_open()) {
         #if TRAINHOG_USEDSVM == SVMLIGHT
             // Remove following line for libsvm which does not support comments
@@ -385,19 +411,54 @@ int main(int argc, char** argv) {
                 fflush(stdout);
                 resetCursor();
             }
+            // Get image matrix for image file name
+            /** for imread flags from openCV documentation, 
+             * @see http://docs.opencv.org/modules/highgui/doc/reading_and_writing_images_and_video.html?highlight=imread#Mat imread(const string& filename, int flags)
+             * @note If you get a compile-time error complaining about following line (esp. imread),
+             * you either do not have a current openCV version (>2.0) 
+             * or the linking order is incorrect, try g++ -o openCVHogTrainer main.cpp `pkg-config --cflags --libs opencv`
+             */
+            Mat imageData = imread(currentImageFile, IMREAD_GRAYSCALE);
+            if (imageData.empty()) {
+                featureVector.clear();
+                printf("Error: HOG image '%s' is empty, features calculation skipped!\n", currentImageFile.c_str());
+                continue;
+            }
+
             // Calculate feature vector from current image file
-            calculateFeaturesFromInput(currentImageFile, featureVector, hog);
-            if (!featureVector.empty()) {
-                /* Put positive or negative sample class to file, 
-                 * true=positive, false=negative, 
-                 * and convert positive class to +1 and negative class to -1 for SVMlight
-                 */
-                File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
-                // Save feature vector components
-                for (unsigned int feature = 0; feature < featureVector.size(); ++feature) {
-                    File << " " << (feature + 1) << ":" << featureVector.at(feature);
+            if (currentFile < positiveTrainingImages.size()) {
+                calculateFeaturesFromInput(imageData, featureVector, hog);
+                if (!featureVector.empty()) {
+                    /* Put positive or negative sample class to file, 
+                     * true=positive, false=negative, 
+                     * and convert positive class to +1 and negative class to -1 for SVMlight
+                     */
+                    File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
+                    // Save feature vector components
+                    for (unsigned int feature = 0; feature < featureVector.size(); ++feature) {
+                        File << " " << (feature + 1) << ":" << featureVector.at(feature);
+                    }
+                    File << endl;
                 }
-                File << endl;
+            } else {
+                std::vector<cv::Mat> samples;
+                createNegativeSamples(imageData, hog.winSize, 48, 96, samples);
+                for (const cv::Mat& img : samples) {
+                    calculateFeaturesFromInput(img, featureVector, hog);
+                    if (!featureVector.empty()) {
+                        /* Put positive or negative sample class to file, 
+                         * true=positive, false=negative, 
+                         * and convert positive class to +1 and negative class to -1 for SVMlight
+                         */
+                        File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
+                        // Save feature vector components
+                        for (unsigned int feature = 0; feature < featureVector.size(); ++feature) {
+                            File << " " << (feature + 1) << ":" << featureVector.at(feature);
+                        }
+                        File << endl;
+                        ++neg_samples_count;
+                    }
+                }
             }
         }
         printf("\n");
@@ -407,6 +468,7 @@ int main(int argc, char** argv) {
         printf("Error opening file '%s'!\n", featuresFile.c_str());
         return EXIT_FAILURE;
     }
+    printf("Using %lu positive training image samples and %d negative samples.", positiveTrainingImages.size(), neg_samples_count);
     // </editor-fold>
 
     // <editor-fold defaultstate="collapsed" desc="Pass features to machine learning algorithm">
