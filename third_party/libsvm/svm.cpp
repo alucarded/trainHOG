@@ -2744,7 +2744,7 @@ int svm_save_model(const char *model_file_name, const svm_model *model)
 static char *line = NULL;
 static int max_line_len;
 
-static char* readline(FILE *input)
+char* readline(FILE *input)
 {
 	int len;
 

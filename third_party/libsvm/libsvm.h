@@ -50,7 +50,9 @@ private:
         exit(1);
     }
 
-    char* readline(FILE *input);
+    char* readline(FILE *input) {
+        return readline(input);
+    }
 
     libSVM() : trainingDataStructsUsed(false), predictionDataStructsUsed(false) {
         line = NULL;
