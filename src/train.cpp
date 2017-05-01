@@ -77,6 +77,9 @@
 #elif TRAINHOG_USEDSVM == LIBSVM
     #include "libsvm/libsvm.h"
     #define TRAINHOG_SVM_TO_TRAIN libSVM
+#else // default
+    #include "opencvsvm/opencvsvm.h"
+    #define TRAINHOG_SVM_TO_TRAIN OpenCVSVM
 #endif
 
 using namespace std;
@@ -90,7 +93,7 @@ static string negSamplesDir = "neg/";
 // Set the file to write the features to
 static string featuresFile = "genfiles/features.dat";
 // Set the file to write the SVM model to
-static string svmModelFile = "genfiles/svmlightmodel.dat";
+static string svmModelFile = "genfiles/svmmodel.dat";
 // Set the file to write the resulting detecting descriptor vector to
 static string descriptorVectorFile = "genfiles/descriptorvector.dat";
 // Set the file to write the resulting opencv hog classifier as YAML file
@@ -250,6 +253,18 @@ static void calculateFeaturesFromInput(const cv::Mat& imageData, vector<float>& 
    // cv::waitKey();
     vector<Point> locations;
     hog.compute(training_img, featureVector, winStride, trainingPadding, locations);
+}
+
+static void writeSampleFeatures(std::fstream& file,
+                                const std::string& label,
+                                const std::vector<float>& feature_vector) {
+    if (feature_vector.empty()) return;
+    file << label;
+    // Save feature vector components
+    for (unsigned int feature = 0; feature < feature_vector.size(); ++feature) {
+    file << " " << (feature + 1) << ":" << feature_vector.at(feature);
+    }
+    file << endl;
 }
 
 /**
@@ -426,36 +441,18 @@ int main(int argc, char** argv) {
             // Calculate feature vector from current image file
             if (currentFile < positiveTrainingImages.size()) {
                 calculateFeaturesFromInput(imageData, featureVector, hog);
-                if (!featureVector.empty()) {
-                    /* Put positive or negative sample class to file, 
-                     * true=positive, false=negative, 
-                     * and convert positive class to +1 and negative class to -1 for SVMlight
-                     */
-                    File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
-                    // Save feature vector components
-                    for (unsigned int feature = 0; feature < featureVector.size(); ++feature) {
-                        File << " " << (feature + 1) << ":" << featureVector.at(feature);
-                    }
-                    File << endl;
-                }
+                /* Put positive or negative sample class to file, 
+                * true=positive, false=negative, 
+                * and convert positive class to +1 and negative class to -1 for SVMlight
+                */
+                writeSampleFeatures(File, currentFile < positiveTrainingImages.size() ? "+1" : "-1", featureVector);
             } else {
                 std::vector<cv::Mat> samples;
-                createNegativeSamples(imageData, hog.winSize, 48, 96, samples);
+                createNegativeSamples(imageData, hog.winSize, 240, 320, samples);
                 for (const cv::Mat& img : samples) {
                     calculateFeaturesFromInput(img, featureVector, hog);
-                    if (!featureVector.empty()) {
-                        /* Put positive or negative sample class to file, 
-                         * true=positive, false=negative, 
-                         * and convert positive class to +1 and negative class to -1 for SVMlight
-                         */
-                        File << ((currentFile < positiveTrainingImages.size()) ? "+1" : "-1");
-                        // Save feature vector components
-                        for (unsigned int feature = 0; feature < featureVector.size(); ++feature) {
-                            File << " " << (feature + 1) << ":" << featureVector.at(feature);
-                        }
-                        File << endl;
-                        ++neg_samples_count;
-                    }
+                    writeSampleFeatures(File, currentFile < positiveTrainingImages.size() ? "+1" : "-1", featureVector);
+                    ++neg_samples_count;
                 }
             }
         }
