@@ -51,7 +51,7 @@ private:
     }
 
     char* readline(FILE *input) {
-        return readline(input);
+        return fgets(line, max_line_len, input);
     }
 
     libSVM() : trainingDataStructsUsed(false), predictionDataStructsUsed(false) {
@@ -136,11 +136,11 @@ public:
         prob.l = 0;
         elements = 0;
 
-        max_line_len = 1024;
+        max_line_len = 262144;
         line = Malloc(char, max_line_len);
         while (readline(fp) != NULL) {
             char *p = strtok(line, " \t"); // label
-
+            printf("readline! %s\n", line);
             // features
             while (1) {
                 p = strtok(NULL, " \t");
@@ -153,6 +153,7 @@ public:
         }
         rewind(fp);
 
+        printf("rewind! features: %d\n", prob.l);
         prob.y = Malloc(double, prob.l);
         prob.x = Malloc(struct svm_node *, prob.l);
         x_space = Malloc(struct svm_node, elements);
@@ -221,6 +222,7 @@ public:
             }
         }
         fclose(fp);
+        printf("READ FEATURES!!");
         this->trainingDataStructsUsed = true;
     }
 
@@ -291,7 +293,9 @@ public:
      * After read in the training samples from a file, set parameters for training and call training procedure
      */
     void train() {
+        printf("STARTED TRAINING.\n");
         model = svm_train(&prob, &param);
+        printf("FINISHED TRAINING.\n");
         trainingDataStructsUsed = true;
     }
 
