@@ -9,6 +9,8 @@
 #include <locale.h>
 #include <stdlib.h>
 
+#include <iostream>
+
 #include <opencv2/core/core.hpp>
 #include <opencv2/ml/ml.hpp>
 
@@ -36,10 +38,17 @@ private:
         max_line_len_ = 262144; // WARNING: read_problem() won't work if line is longer
 
         svm_ = cv::ml::SVM::create();
-        svm_->setType(cv::ml::SVM::C_SVC);
-        svm_->setKernel(cv::ml::SVM::LINEAR);
-        svm_->setTermCriteria(cv::TermCriteria(cv::TermCriteria::MAX_ITER, 100, 1e-6));
-/*        predict_probability = 1; // 0 or 1
+		//svm_->setCoef0(0.0);
+		//svm_->setDegree(3);
+		//svm_->setTermCriteria(cv::TermCriteria( CV_TERMCRIT_ITER+CV_TERMCRIT_EPS, 10000, 1e-6 ));
+		//svm_->setGamma(1);
+		//svm_->setKernel(cv::ml::SVM::LINEAR);
+		//svm_->setNu(0.5);
+		//svm_->setP(0.1); // for EPSILON_SVR, epsilon in loss function?
+		//svm_->setC(0.01); // From paper, soft classifier
+		//svm_->setType(cv::ml::SVM::C_SVC); // C_SVC; // EPSILON_SVR; // may be also NU_SVR; // do regression task
+        
+        /*        predict_probability = 1; // 0 or 1
         // Init some parameters
         param.cache_size = 512; // in MB
         param.coef0 = 0.0; // for poly/sigmoid kernel
@@ -204,9 +213,15 @@ public:
      * After read in the training samples from a file, set parameters for training and call training procedure
      */
     void train() {
-        printf("features_: %dx%d, labels_: %dx%d", features_.rows, features_.cols, labels_.rows, labels_.cols);
+        //printf("features_: %dx%d, labels_: %dx%d", features_.rows, features_.cols, labels_.rows, labels_.cols);
+        //std::cout << labels_;
+        //getchar();
+        //std::cout << features_.row(0);
         cv::Ptr<cv::ml::TrainData> data = cv::ml::TrainData::create(features_, cv::ml::ROW_SAMPLE, labels_);
-        svm_->trainAuto(data);
+        if (!svm_->trainAuto(data)) {
+            printf("Training ERROR!");
+        }
+        saveModelToFile("genfiles/opencvsvmmodel.xml");
     }
 
     /**
@@ -227,6 +242,11 @@ public:
         double rho = svm_->getDecisionFunction(0, alphas, svidx);
         printf("RHO: %lf\n", rho);
 
+        printf("ALPHAS:\n");
+        for ( double x : alphas ) {
+            printf("%lf\t", x);
+        }
+        printf("\n");
         cv::Mat svecs = svm_->getSupportVectors();
         printf("Total number of support vectors: %d \n", svecs.rows);
         // Walk over every support vector and build a single vector
@@ -238,8 +258,10 @@ public:
             for (int i = 0; i < support_vec.cols; ++i) { // index=-1 indicates the end of the array
                 if (ssv == 0) { // During first loop run determine the length of the support vectors and adjust the required vector size
                     detector.push_back(support_vec_data[i] * alphas[i]);
+                    printf("%f\t", detector[detector.size()-1]);
+
                     // Assume indices are in order
-                    detector_indices.push_back(svidx[i]); // Holds the indices for the corresponding values in detector, mapping from singleVectorComponent to support_vec[singleVectorComponent].index!
+                    //detector_indices.push_back(svidx[i]); // Holds the indices for the corresponding values in detector, mapping from singleVectorComponent to support_vec[singleVectorComponent].index!
                 } else {
                     if (i > detector.size()) { // Catch oversized vectors (maybe from differently sized images?)
                         printf("Warning: Component %d out of range, should have the same size as other/first vector\n", i);
@@ -248,9 +270,9 @@ public:
                 }
             }
         }
-
+        printf("\n");
         // This is a threshold value which is also recorded in the lear code in lib/windetect.cpp at line 1297 as linearbias and in the original paper as constant epsilon, but no comment on how it is generated
-        //detector.push_back(-rho); // Add threshold
+        detector.push_back(-(prec)rho); // Add threshold
         //detector_indices.push_back(-1); // Add maximum unsigned int as index indicating the end of the vector
         //detector_indices->push_back(UINT_MAX); // Add maximum unsigned int as index indicating the end of the vector
     }
@@ -260,7 +282,9 @@ public:
      * @return detection threshold / bias
      */
     double getThreshold() const {
-        return 0.2f;
+        std::vector<double> alphas;
+        std::vector<int> svidx;
+        return svm_->getDecisionFunction(0, alphas, svidx);
     }
 
 };

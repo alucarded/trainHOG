@@ -72,11 +72,11 @@ include_directories( ${TRAINHOG_SOURCE_DIR}/third_party )
 
 if(TRAINHOG_USEDSVM EQUAL ${SVMLIGHT})
     set(SRCS
-        third_party/svmlight/svm_learn.h
+        #third_party/svmlight/svm_learn.h
         third_party/svmlight/svm_learn.c
-        third_party/svmlight/svm_hideo.h
+        #third_party/svmlight/svm_hideo.h
         third_party/svmlight/svm_hideo.c
-        third_party/svmlight/svm_common.h
+        #third_party/svmlight/svm_common.h
         third_party/svmlight/svm_common.c
         )
 elseif(TRAINHOG_USEDSVM EQUAL ${LIBSVM})
@@ -91,8 +91,16 @@ else()
 endif()
 
 set(TRAINHOG_MAIN src/train.cpp)
+set(TESTHOG_MAIN src/test.cpp)
+set(HOGFEATURES_MAIN src/get_features.cpp)
 
 message( ${SRCS} )
-add_executable(${EXEC_NAME} ${TRAINHOG_MAIN} ${SRCS})
 
+add_executable(${EXEC_NAME} ${TRAINHOG_MAIN} ${SRCS})
 target_link_libraries(${EXEC_NAME} ${OpenCV_LIBS})
+
+add_executable(testhog ${TESTHOG_MAIN} ${SRCS})
+target_link_libraries(testhog ${OpenCV_LIBS})
+
+add_executable(getfeatures ${HOGFEATURES_MAIN} ${SRCS})
+target_link_libraries(getfeatures ${OpenCV_LIBS})
